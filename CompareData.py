@@ -5,17 +5,18 @@ import cx_Oracle
 import pymysql
 import config
 import os
+import time
 
-def query_oracle_store_info(store_hostname):
+def query_oracle_store_info(store_code):
     connstr = config.connstr
     dbconnection = cx_Oracle.connect(connstr)
     cursor = dbconnection.cursor()
 
     get_sbs_no = """select sbs_no from rps.subsidiary
-                    where sid in (select default_sbs_sid from rps.controller where address = '""" + store_hostname + """')"""
+                    where sid in (select sbs_sid from rps.store where store_code = '""" + store_code + """')"""
 
     get_store_no = """select store_no from rps.store
-                      where sid in (select store_sid from rps.controller where address = '""" + store_hostname + """')"""
+                      where store_code = '""" + store_code + """'"""
 
     cursor.execute(get_sbs_no)
     sbs_no = cursor.fetchone()
@@ -37,7 +38,7 @@ def query_oracle_total_qty(store_hostname, sbs_no, store_no):
 
     get_total_qty = """select sum(qty) from cms.invn_sbs_qty 
                        where sbs_no = """ + str(sbs_no) + """ and store_no = """ + str(store_no) + """ 
-                       and item_sid in (select item_sid from cms.invn_sbs where active = 1)"""
+                       and item_sid in (select item_sid from cms.invn_sbs where active = 1 and sbs_no = """ + str(sbs_no) + """)"""
 
     cursor.execute(get_total_qty)
     oracle_total_qty = cursor.fetchone()
@@ -55,7 +56,7 @@ def query_oracle_invn_list(store_hostname, sbs_no, store_no):
 
     get_invn_list = """select item_sid, qty from cms.invn_sbs_qty 
                        where sbs_no = """ + str(sbs_no) + """ and store_no = """ + str(store_no) + """ 
-                       and item_sid in (select item_sid from cms.invn_sbs where active = 1)
+                       and item_sid in (select item_sid from cms.invn_sbs where active = 1 and sbs_no = """ + str(sbs_no) + """)
                        and qty is not null
                        order by item_sid"""
     
@@ -78,7 +79,7 @@ def query_mysql_total_qty(store_hostname, sbs_no, store_no):
 
     # execute SQL query using execute() method.
     cursor.execute("""select sum(qty) from rpsods.invn_sbs_item_qty 
-                      where invn_sbs_item_sid in (select sid from rpsods.invn_sbs_item where active = 1) 
+                      where invn_sbs_item_sid in (select sid from rpsods.invn_sbs_item where active = 1 and sbs_sid in (select sid from rpsods.subsidiary where sbs_no = """ + str(sbs_no) + """)) 
                       and sbs_sid in (select sid from rpsods.subsidiary where sbs_no = """ + str(sbs_no) + """) 
                       and store_sid in (select sid from rpsods.store where store_no = """ + str(store_no) + """);""")
 
@@ -103,7 +104,7 @@ def query_mysql_invn_list(store_hostname, sbs_no, store_no):
     cursor.execute("""select b.invn_item_uid, a.qty 
                       from rpsods.invn_sbs_item_qty as a 
                       left join rpsods.invn_sbs_item as b on a.invn_sbs_item_sid = b.sid
-                      where a.invn_sbs_item_sid in (select sid from rpsods.invn_sbs_item where active = 1) 
+                      where a.invn_sbs_item_sid in (select sid from rpsods.invn_sbs_item where active = 1 and sbs_sid in (select sid from rpsods.subsidiary where sbs_no = """ + str(sbs_no) + """)) 
                       and a.sbs_sid in (select sid from rpsods.subsidiary where sbs_no = """ + str(sbs_no) + """) 
                       and a.store_sid in (select sid from rpsods.store where store_no = """ + str(store_no) + """)
                       and a.qty is not null
@@ -128,7 +129,7 @@ def compare_total_qty(store_hostname, sbs_no, store_no):
         print(store_hostname + ' Qty:' + str(mysql_total_qty))
         print('Equal.')
         file.write('POA Qty: ' + str(oracle_total_qty) + '\n')
-        file.write(store_hostname + ' Qty:' + str(mysql_total_qty) + '\n')
+        file.write(store_hostname + ' Qty: ' + str(mysql_total_qty) + '\n')
         file.write('Equal.')
         return('Equal')
 
@@ -141,20 +142,26 @@ def compare_total_qty(store_hostname, sbs_no, store_no):
         file.write('Not Equal.\n')
         return('Not Equal')
 
-def compare_lists(store_hostname, sbs_no, store_no, oracle_invn_list, mysql_invn_list):
+def compare_lists(store_hostname, sbs_no, store_no, oracle_invn_list, mysql_invn_list, resend_data):
     print('Comparing quantities between POA and store ' + store_hostname + '...')
     for key in oracle_invn_list:
         if not key in mysql_invn_list:
             print('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.')
             file.write('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.\n')
-            oracle_rep_check(sbs_no, store_no, key)
+            rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
+            if rep_check_oracle != True:
+                if resend_data == True:
+                    resend_item_v9(key, sbs_no, store_no)
             continue
         if oracle_invn_list[key] != mysql_invn_list[key]:
             print('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]))
             file.write('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]) + '\n')
-            rep_check = oracle_rep_check(sbs_no, store_no, key)
-            if rep_check != True:
-                mysql_rep_check(sbs_no, store_no, key)
+            rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
+            if rep_check_oracle != True:
+                rep_check_mysql = mysql_rep_check(sbs_no, store_no, key)
+                if rep_check_mysql == False and resend_data == True:
+                    resend_item_v9(key, sbs_no, store_no)
+
     for key in mysql_invn_list:
         if not key in oracle_invn_list:                
             print('Item SID: ' + str(key) + ' not found at POA.')
@@ -180,7 +187,9 @@ def mysql_rep_check(sbs_no, store_no, key):
     if int(mysql_rep_check[0]) > 0:
         print('Item SID: ' + str(key) + ' is waiting to be replicated from the store to the POA.')
         file.write('Item SID: ' + str(key) + ' is waiting to be replicated from the store to the POA.\n')
-        return
+        return True
+    else:
+        return False
 
 def oracle_rep_check(sbs_no, store_no, key):
     connstr = config.connstr
@@ -211,15 +220,57 @@ def oracle_rep_check(sbs_no, store_no, key):
         print('Item SID: ' + str(key) + ' is waiting to be replicated from the POA to the store.')
         file.write('Item SID: ' + str(key) + ' is waiting to be replicated from the POA to the store.\n')
         return True
-            
+
+def resend_item_v9(item_sid, sbs_no, store_no):
+    connstr = config.connstr
+    dbconnection = cx_Oracle.connect(connstr)
+    cursor = dbconnection.cursor()
+
+    resend_invn = """update cms.invn_sbs set modified_date = modified_date where item_sid = """ + str(item_sid) + """ 
+                     and sbs_no = """ + str(sbs_no) + """"""
+
+    resend_invn_qty = """update cms.invn_sbs_qty set qty = qty where item_sid = """ + str(item_sid) + """ 
+                      and sbs_no = """ + str(sbs_no) + """
+                      and store_no = """ + str(store_no) + """"""
+
+    resend_invn_price = """update cms.invn_sbs_price set sbs_no = sbs_no where item_sid = """ + str(item_sid) + """ 
+                        and sbs_no = """ + str(sbs_no) + """"""
+
+    commit = """commit"""
+
+    cursor.execute(resend_invn)
+    cursor.execute(resend_invn_qty)
+    cursor.execute(resend_invn_price)
+    cursor.execute(commit)
+
+    print('Item SID: ' + str(item_sid) + ' has been queued for replication from the POA to the store.')
+    file.write('Item SID: ' + str(item_sid) + ' has been queued for replication from the POA to the store.\n')
+
+    cursor.close()
+    dbconnection.close()
+
+time_and_date = time.strftime("%Y-%m-%d_%H-%M-%S")
 store_hostname = input('Enter the store servers hostname: ')
+store_code = input('Enter the store code: ')
+resend_data = input("Replicate items where quantites don't match? y/n: ")
+if resend_data == 'y':
+    resend_data = True
+else: 
+    resend_data = False
+
 try:
-    os.remove(store_hostname + '_results.txt')
+    os.remove(store_hostname + '_' + time_and_date + '.txt')
 except OSError:
     pass
-file = open(store_hostname + '_results.txt', 'w')
-print(store_hostname)
-store_info = query_oracle_store_info(store_hostname)
+
+file = open(store_hostname + '_' + time_and_date + '.txt', 'w')
+print('Store: ' + store_hostname)
+file.write('Store: ' + store_hostname + '\n')
+store_info = query_oracle_store_info(store_code)
+print('SBS No: ' + str(store_info['sbs_no']))
+file.write('SBS No: ' + str(store_info['sbs_no']) + '\n')
+print('Store No: ' + str(store_info['store_no']))
+file.write('Store No: ' + str(store_info['store_no']) + '\n')
 
 total_qty = compare_total_qty(store_hostname, store_info['sbs_no'], store_info['store_no'])
 
@@ -232,6 +283,6 @@ if total_qty == 'Not Equal':
     mysql_invn_list = dict(mysql_invn_list)
     mysql_invn_list = {key:int(value) for key, value in mysql_invn_list.items()}
     
-    compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_list, mysql_invn_list)
+    compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_list, mysql_invn_list, resend_data)
 
 file.close()
