@@ -6,7 +6,7 @@ import pymysql
 import config
 import os
 import time
-import datetime
+import csv
 
 def check_host_is_correct(store_hostname):
     # Open database connection
@@ -58,6 +58,7 @@ def query_oracle_store_info(store_code):
 
     cursor.execute(get_sbs_no)
     sbs_no = cursor.fetchone()
+    print(sbs_no)
     sbs_no = sbs_no[0]
     # print(sbs_no)
     cursor.execute(get_store_no)
@@ -115,9 +116,11 @@ def query_mysql_total_qty(store_hostname, sbs_no, store_no):
     except:
         print('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database.')
         file.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n')
+        errors.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
         summary.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
         file.close()
         summary.close()
+        errors.close()
         return 'Offline'
     # prepare a cursor object using cursor() method
     cursor = db.cursor()
@@ -145,6 +148,8 @@ def query_mysql_invn_list(store_hostname, sbs_no, store_no):
     except:
         print('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database.')
         file.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n')
+        errors.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
+        errors.close()
         file.close()
         return 'Offline'
     # prepare a cursor object using cursor() method
@@ -158,7 +163,7 @@ def query_mysql_invn_list(store_hostname, sbs_no, store_no):
                       and a.sbs_sid in (select sid from rpsods.subsidiary where sbs_no = """ + str(sbs_no) + """) 
                       and a.store_sid in (select sid from rpsods.store where store_no = """ + str(store_no) + """)
                       and a.qty is not null
-                      group by b.invn_item_uid;""")
+                      order by b.invn_item_uid;""")
 
     # Fetch a single row using fetchone() method.
     mysql_invn_list = cursor.fetchall()
@@ -205,17 +210,18 @@ def compare_lists(store_hostname, sbs_no, store_no, oracle_invn_list, mysql_invn
     print('Comparing quantities between POA and store ' + store_hostname + '...')
     for key in oracle_invn_list:
         if not key in mysql_invn_list:
-            print('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.')
-            file.write('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.\n')
-            rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
-            print('rep_check_oracle = ' + str(rep_check_oracle))
-            file.write('rep_check_oracle = ' + str(rep_check_oracle) + '\n')
-            if rep_check_oracle != True:
-                if resend_data == True:
-                    print('Resending data...')
-                    file.write('Resending data...' + '\n')
-                    resend_item_v9(key, sbs_no, store_no)
-            continue
+            if str(oracle_invn_list[key]) != '0':
+                print('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.')
+                file.write('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.\n')
+                rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
+                print('rep_check_oracle = ' + str(rep_check_oracle))
+                file.write('rep_check_oracle = ' + str(rep_check_oracle) + '\n')
+                if rep_check_oracle != True:
+                    if resend_data == True:
+                        print('Resending data...')
+                        file.write('Resending data...' + '\n')
+                        resend_item_v9(key, sbs_no, store_no)
+                continue
         if oracle_invn_list[key] != mysql_invn_list[key]:
             print('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]))
             file.write('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]) + '\n')
@@ -238,6 +244,11 @@ def compare_lists(store_hostname, sbs_no, store_no, oracle_invn_list, mysql_invn
             print('Item SID: ' + str(key) + ' not found at POA.')
             file.write('Item SID: ' + str(key) + ' not found at POA.\n')
 
+    file.flush()
+    os.fsync(file.fileno())
+    summary.flush()
+    os.fsync(summary.fileno())
+
 def mysql_rep_check(sbs_no, store_no, key):
     # Open database connection
     try:
@@ -245,7 +256,11 @@ def mysql_rep_check(sbs_no, store_no, key):
     except:
         print('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database.')
         file.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n')
+        errors.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
+        summary.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
+        summary.close()
         file.close()
+        errors.close()
         return 'Offline'
     # prepare a cursor object using cursor() method
     cursor = db.cursor()
@@ -330,165 +345,79 @@ time_and_date = time.strftime("%Y-%m-%d_%H-%M-%S")
 #store_code = input('Enter the store code: ')
 #resend_data = input("Replicate items where quantites don't match? y/n: ")
 
-today = datetime.date.today()
+with open('stores.txt') as f:
+    store_list = csv.reader(f, skipinitialspace=True)
 
-store_list = [
-    {'store_hostname': 'kkm-1', 'store_code': 'KKM'},
-    {'store_hostname': 'pve-1', 'store_code': 'PVE'},
-    {'store_hostname': 'ggj-1', 'store_code': 'GGJ'},
-    {'store_hostname': 'dpm-1', 'store_code': 'DPM'},
-    {'store_hostname': 'scj-1', 'store_code': 'SCJ'},
-    {'store_hostname': 'spm-1', 'store_code': 'SPM'},
-    {'store_hostname': 'pue-1', 'store_code': 'PUE'},
-    {'store_hostname': 'kve-1', 'store_code': 'KVE'},
-    {'store_hostname': 'cwj-1', 'store_code': 'CWJ'},
-    {'store_hostname': 'bbm-1', 'store_code': 'BBM'},
-    {'store_hostname': 'btm-1a', 'store_code': 'BTM'},
-    {'store_hostname': 'kmm-1', 'store_code': 'KMM'},
-    {'store_hostname': 'mtm-1', 'store_code': 'MTM'},
-    {'store_hostname': 'pio-1', 'store_code': 'PIO'},
-    {'store_hostname': 'tpo-1', 'store_code': 'TPO'},
-    {'store_hostname': 'aye-1', 'store_code': 'AYE'},
-    {'store_hostname': 'bpe-1', 'store_code': 'BPE'},
-    {'store_hostname': 'bse-1', 'store_code': 'BSE'},
-    {'store_hostname': 'bxe-1', 'store_code': 'BXE'},
-    {'store_hostname': 'cpe-1', 'store_code': 'CPE'},
-    {'store_hostname': 'gre-1a', 'store_code': 'GRE'},
-    {'store_hostname': 'kke-1', 'store_code': 'KKE'},
-    {'store_hostname': 'mte-1', 'store_code': 'MTE'},
-    {'store_hostname': 'pee-1', 'store_code': 'PEE'},
-    {'store_hostname': 'pie-1', 'store_code': 'PIE'},
-    {'store_hostname': 'ppe-1a', 'store_code': 'PPE'},
-    {'store_hostname': 'sbe-1', 'store_code': 'SBE'},
-    {'store_hostname': 'sce-1', 'store_code': 'SCE'},
-    {'store_hostname': 'sme-1', 'store_code': 'SME'},
-    {'store_hostname': 'tae-1', 'store_code': 'TAE'},
-    {'store_hostname': 'tme-1', 'store_code': 'TME'},
-    {'store_hostname': 'kgj-1', 'store_code': 'KGJ'},
-    {'store_hostname': 'kvj-1', 'store_code': 'KVJ'},
-    {'store_hostname': 'pij-1', 'store_code': 'PIJ'},
-    {'store_hostname': 'pvj-1', 'store_code': 'PVJ'},
-   # {'store_hostname': 'suj-1', 'store_code': 'SUJ'},
-    {'store_hostname': 'tpj-1', 'store_code': 'TPJ'},
-    {'store_hostname': 'bdm-1a', 'store_code': 'BDM'},
-    {'store_hostname': 'cpj-1', 'store_code': 'CPJ'},
-    {'store_hostname': 'gio-1', 'store_code': 'GIO'},
-    {'store_hostname': 'pkj-1', 'store_code': 'PKJ'},
-    {'store_hostname': 'pem-1', 'store_code': 'PEM'},
-    {'store_hostname': 'rim-1', 'store_code': 'RIM'},
-    {'store_hostname': 't3m-1a', 'store_code': 'T3M'},
-    {'store_hostname': 'aym-1', 'store_code': 'AYM'},
-    {'store_hostname': 'ppm-1', 'store_code': 'PPM'},
-    {'store_hostname': 'bxm-1', 'store_code': 'BXM'},
-    {'store_hostname': 'cmm-1', 'store_code': 'CMM'},
-    {'store_hostname': 'skm-1', 'store_code': 'SKM'},
-    {'store_hostname': 'kam-1', 'store_code': 'KAM'},
-    {'store_hostname': 'pim-1', 'store_code': 'PIM'},
-    {'store_hostname': 'pum-1', 'store_code': 'PUM'},
-    {'store_hostname': 'cpm-1', 'store_code': 'CPM'},
-    {'store_hostname': 'pvm-1', 'store_code': 'PVM'},
-    {'store_hostname': 'tsm-1', 'store_code': 'TSM'},
-    {'store_hostname': 'bmm-1', 'store_code': 'BMM'},
-    {'store_hostname': 'plm-1', 'store_code': 'PLM'},
-    {'store_hostname': 'lpm-1', 'store_code': 'LPM'},
-    {'store_hostname': 'gam-1', 'store_code': 'GAM'},
-    {'store_hostname': 'pbm-1', 'store_code': 'PBM'},
-    {'store_hostname': 'pkm-1', 'store_code': 'PKM'},
-    {'store_hostname': 'smm-1', 'store_code': 'SMM'},
-    {'store_hostname': 'hmm-1', 'store_code': 'HMM'},
-    {'store_hostname': 'tmm-1', 'store_code': 'TMM'},
-    {'store_hostname': 'bpm-1', 'store_code': 'BPM'},
-    {'store_hostname': 'sum-1a', 'store_code': 'SUM'},
-    {'store_hostname': 'pmm-1a', 'store_code': 'PMM'},
-    {'store_hostname': 'scm-1', 'store_code': 'SCM'},
-    {'store_hostname': 'kvm-1', 'store_code': 'KVM'},
-    {'store_hostname': 'phm-1', 'store_code': 'PHM'},
-    {'store_hostname': 'gim-1a', 'store_code': 'GIM'},
-    {'store_hostname': 'klm-1', 'store_code': 'KLM'},
-    {'store_hostname': 'pve-1', 'store_code': 'PVE'},
-    {'store_hostname': 'sbm-1', 'store_code': 'SBM'},
-    #{'store_hostname': 'tam-1a', 'store_code': 'TAM'},
-    {'store_hostname': 'kgo-1', 'store_code': 'KGO'},
-    {'store_hostname': 'plo-1', 'store_code': 'PLO'},
-    {'store_hostname': 'cme-1', 'store_code': 'CME'},
-    {'store_hostname': 'kle-1', 'store_code': 'KLE'},
-    {'store_hostname': 'tse-1', 'store_code': 'TSE'},
-    {'store_hostname': 'gij-1', 'store_code': 'GIJ'},
-    {'store_hostname': 'kaj-1', 'store_code': 'KAJ'},
-    {'store_hostname': 'kkj-1', 'store_code': 'KKJ'},
-    {'store_hostname': 'lpj-1', 'store_code': 'LPJ'},
-    {'store_hostname': 'phj-1', 'store_code': 'PHJ'},
-    {'store_hostname': 'spj-1', 'store_code': 'SPJ'},
-    #{'store_hostname': 'xxj-1', 'store_code': 'XXJ'}
+    for store in store_list:
+        store_hostname = store[0]
+        store_code = store[1]
 
-]
+        resend_data = 'y'
 
-for store in store_list:
-    store_hostname = store['store_hostname']
-    store_code = store['store_code']
+        if resend_data == 'y':
+            resend_data = True
+        else: 
+            resend_data = False
 
-    resend_data = 'y'
+        if not os.path.exists('Qty_' + str(time_and_date)):
+            os.makedirs('Qty_' + str(time_and_date))
 
-    if resend_data == 'y':
-        resend_data = True
-    else: 
-        resend_data = False
-
-    if not os.path.exists(str(today)):
-        os.makedirs(str(today))
-
-    try:
-        os.remove(str(today) + '\\' + store_hostname + '_' + time_and_date + '.txt')
-    except OSError:
-        pass
-
-    summary = open(str(today) + '\\summary_' + time_and_date + '.txt', 'a')
-  
-    file = open(str(today) + '\\' + store_hostname + '_' + time_and_date + '.txt', 'w')
-    print('Store Hostname: ' + store_hostname)
-    file.write('Store Hostname: ' + store_hostname + '\n')
-    summary.write('Store Hostname: ' + store_hostname + '\n')
-    print('Store Code: ' + store_code)
-    file.write('Store Code: ' + store_code + '\n')
-    summary.write('Store Code: ' + store_code + '\n')
-    store_info = query_oracle_store_info(store_code)
-    print('SBS No: ' + str(store_info['sbs_no']))
-    file.write('SBS No: ' + str(store_info['sbs_no']) + '\n')
-    summary.write('SBS No: ' + str(store_info['sbs_no']) + '\n')
-    print('Store No: ' + str(store_info['store_no']))
-    file.write('Store No: ' + str(store_info['store_no']) + '\n')
-    summary.write('Store No: ' + str(store_info['store_no']) + '\n')
-    print('Resend Data: ' + str(resend_data))
-    file.write('Resend Data: ' + str(resend_data) + '\n')
-    summary.write('Resend Data: ' + str(resend_data) + '\n')
-
-    host_check = check_host_is_correct(store_hostname)
-
-    if host_check != True:
-        continue
-
-    total_qty = compare_total_qty(store_hostname, store_info['sbs_no'], store_info['store_no'])
-
-    if total_qty == 'Offline':
-        continue
-
-    if total_qty == 'Not Equal':
-        oracle_invn_list = query_oracle_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-        oracle_invn_list = dict(oracle_invn_list)
-        oracle_invn_list = {key:int(value) for key, value in oracle_invn_list.items()}
-
-        mysql_invn_list = query_mysql_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        summary = open('Qty_' + str(time_and_date) + '\\Qty_Summary_' + time_and_date + '.txt', 'a')
+        errors = open('Qty_' + str(time_and_date) + '\\Qty_Errors_' + time_and_date + '.txt', 'a')
+        file = open('Qty_' + str(time_and_date) + '\\Qty_' + store_hostname + '_' + time_and_date + '.txt', 'w')
         
-        if mysql_invn_list == 'Offline':
+        print('Store Hostname: ' + store_hostname)
+        file.write('Store Hostname: ' + store_hostname + '\n')
+        summary.write('Store Hostname: ' + store_hostname + '\n')
+        print('Store Code: ' + store_code)
+        file.write('Store Code: ' + store_code + '\n')
+        summary.write('Store Code: ' + store_code + '\n')
+        store_info = query_oracle_store_info(store_code)
+        print('SBS No: ' + str(store_info['sbs_no']))
+        file.write('SBS No: ' + str(store_info['sbs_no']) + '\n')
+        summary.write('SBS No: ' + str(store_info['sbs_no']) + '\n')
+        print('Store No: ' + str(store_info['store_no']))
+        file.write('Store No: ' + str(store_info['store_no']) + '\n')
+        summary.write('Store No: ' + str(store_info['store_no']) + '\n')
+        print('Resend Data: ' + str(resend_data))
+        file.write('Resend Data: ' + str(resend_data) + '\n')
+        summary.write('Resend Data: ' + str(resend_data) + '\n')
+
+        file.flush()
+        os.fsync(file.fileno())
+        summary.flush()
+        os.fsync(summary.fileno())
+        errors.flush()
+        os.fsync(errors.fileno())
+
+        host_check = check_host_is_correct(store_hostname)
+
+        if host_check != True:
             continue
 
-        mysql_invn_list = dict(mysql_invn_list)
-        mysql_invn_list = {key:int(value) for key, value in mysql_invn_list.items()}
-        
-        compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_list, mysql_invn_list, resend_data)
+        total_qty = compare_total_qty(store_hostname, store_info['sbs_no'], store_info['store_no'])
 
-        if compare_lists == 'Offline':
+        if total_qty == 'Offline':
             continue
 
-    file.close()
-    summary.close()
+        if total_qty == 'Not Equal':
+            oracle_invn_list = query_oracle_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+            oracle_invn_list = dict(oracle_invn_list)
+            oracle_invn_list = {key:int(value) for key, value in oracle_invn_list.items()}
+
+            mysql_invn_list = query_mysql_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+            
+            if mysql_invn_list == 'Offline':
+                continue
+
+            mysql_invn_list = dict(mysql_invn_list)
+            mysql_invn_list = {key:int(value) for key, value in mysql_invn_list.items()}
+            
+            compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_list, mysql_invn_list, resend_data)
+
+            if compare_lists == 'Offline':
+                continue
+
+        file.close()
+        summary.close()
+        errors.close()
