@@ -233,6 +233,7 @@ def compare_lists(store_hostname, sbs_no, store_no, oracle_invn_dict, mysql_invn
                 if resend_data == True:
                     print('Resending data...')
                     file.write('Resending data...' + '\n')
+                    investigate.write('Item SID: ' + str(poa_record['invn_sid']) + ' Price Level: ' + str(poa_record['price_lvl']) + ' differance found at ' + store_hostname + '. Item is not waiting to be replicated.\n')
                     resend_item_v9(str(poa_record['invn_sid']), sbs_no, store_no)
             
             
@@ -326,9 +327,10 @@ with open('stores.txt') as f:
         if not os.path.exists('Price_' + str(time_and_date)):
             os.makedirs('Price_' + str(time_and_date))
 
-        errors = open('Price_' + str(time_and_date) + '\\Price_Errors_' + time_and_date + '.txt', 'a')
-        summary = open('Price_' + str(time_and_date) + '\\Price_Summary_' + time_and_date + '.txt', 'a')
-        file = open('Price_' + str(time_and_date) + '\\Price_' + store_hostname + '_' + time_and_date + '.txt', 'w')
+        errors = open('Price_' + str(time_and_date) + '\\Errors_Price_' + time_and_date + '.txt', 'a')
+        summary = open('Price_' + str(time_and_date) + '\\Summary_Price_' + time_and_date + '.txt', 'a')
+        file = open('Price_' + str(time_and_date) + '\\' + store_hostname + '_Price_' + time_and_date + '.txt', 'w')
+        investigate = open('Price_' + str(time_and_date) + '\\Investigate_Price_' + time_and_date + '.txt', 'a')
         
         print('Store Hostname: ' + store_hostname)
         file.write('Store Hostname: ' + store_hostname + '\n')
@@ -353,36 +355,38 @@ with open('stores.txt') as f:
         os.fsync(summary.fileno())
         errors.flush()
         os.fsync(errors.fileno())
+        investigate.flush()
+        os.fsync(investigate.fileno())
 
         host_check = check_host_is_correct(store_hostname)
 
         if host_check != True:
             continue
         
-        total_price = compare_total_price(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        #total_price = compare_total_price(store_hostname, store_info['sbs_no'], store_info['store_no'])
 
-        if total_price == 'Offline':
+        #if total_price == 'Offline':
+        #    continue
+
+        #if total_price == 'Not Equal':
+        oracle_invn_list = query_oracle_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        oracle_invn_dict = []
+        for record in oracle_invn_list:
+            oracle_invn_dict.append(dict(invn_sid = record[0], price_lvl = record[1], price = record[2]))
+
+        mysql_invn_list = query_mysql_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        
+        if mysql_invn_list == 'Offline':
             continue
 
-        if total_price == 'Not Equal':
-            oracle_invn_list = query_oracle_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-            oracle_invn_dict = []
-            for record in oracle_invn_list:
-                oracle_invn_dict.append(dict(invn_sid = record[0], price_lvl = record[1], price = record[2]))
+        mysql_invn_dict = []
+        for record in mysql_invn_list:
+            mysql_invn_dict.append(dict(invn_sid = record[0], price_lvl = record[1], price = record[2]))
+        
+        compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_dict, mysql_invn_dict, resend_data)
 
-            mysql_invn_list = query_mysql_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-            
-            if mysql_invn_list == 'Offline':
-                continue
-
-            mysql_invn_dict = []
-            for record in mysql_invn_list:
-                mysql_invn_dict.append(dict(invn_sid = record[0], price_lvl = record[1], price = record[2]))
-            
-            compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_dict, mysql_invn_dict, resend_data)
-
-            if compare_lists == 'Offline':
-                continue
+        if compare_lists == 'Offline':
+            continue
 
         file.close()
         summary.close()

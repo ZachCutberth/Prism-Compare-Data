@@ -16,7 +16,10 @@ def check_host_is_correct(store_hostname):
         print('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database.')
         file.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n')
         summary.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
+        errors.write('Store Hostname: ' + store_hostname + ' - Could not connect to MySQL database. \n\n')
         file.close()
+        errors.close()
+        summary.close()
         return 'Offline'
     # prepare a cursor object using cursor() method
     cursor = db.cursor()
@@ -42,6 +45,8 @@ def check_host_is_correct(store_hostname):
         print('Store Hostname: ' + store_hostname + ' does not match with active controller record address: ' + address)
         file.write('Store Hostname: ' + store_hostname + ' does not match with active controller record address: ' + address + '\n')
         summary.write('Store Hostname: ' + store_hostname + ' does not match with active controller record address: ' + address + '\n\n')
+        errors.write('Store Hostname: ' + store_hostname + ' does not match with active controller record address: ' + address + '\n\n')
+        errors.close()
         summary.close()
         return False
 
@@ -58,7 +63,6 @@ def query_oracle_store_info(store_code):
 
     cursor.execute(get_sbs_no)
     sbs_no = cursor.fetchone()
-    print(sbs_no)
     sbs_no = sbs_no[0]
     # print(sbs_no)
     cursor.execute(get_store_no)
@@ -210,33 +214,35 @@ def compare_lists(store_hostname, sbs_no, store_no, oracle_invn_list, mysql_invn
     print('Comparing quantities between POA and store ' + store_hostname + '...')
     for key in oracle_invn_list:
         if not key in mysql_invn_list:
-            if str(oracle_invn_list[key]) != '0':
-                print('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.')
-                file.write('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.\n')
-                rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
-                print('rep_check_oracle = ' + str(rep_check_oracle))
-                file.write('rep_check_oracle = ' + str(rep_check_oracle) + '\n')
-                if rep_check_oracle != True:
-                    if resend_data == True:
-                        print('Resending data...')
-                        file.write('Resending data...' + '\n')
-                        resend_item_v9(key, sbs_no, store_no)
-                continue
+            #if str(oracle_invn_list[key]) != '0':
+            print('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.')
+            file.write('Item SID: ' + str(key) + ' not found at ' + store_hostname + '.\n')
+            rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
+            #print('rep_check_oracle = ' + str(rep_check_oracle))
+            #file.write('rep_check_oracle = ' + str(rep_check_oracle) + '\n')
+            if rep_check_oracle != True:
+                if resend_data == True:
+                    print('Resending data...')
+                    file.write('Resending data...' + '\n')
+                    investigate.write('Item SID: ' + str(key) + ' not found at ' + store_hostname + '. Item is not waiting to be replicated.\n\n')
+                    resend_item_v9(key, sbs_no, store_no)
+            continue
         if oracle_invn_list[key] != mysql_invn_list[key]:
             print('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]))
             file.write('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]) + '\n')
             rep_check_oracle = oracle_rep_check(sbs_no, store_no, key)
-            print('rep_check_oracle = ' + str(rep_check_oracle))
-            file.write('rep_check_oracle = ' + str(rep_check_oracle) + '\n')
+            #print('rep_check_oracle = ' + str(rep_check_oracle))
+            #file.write('rep_check_oracle = ' + str(rep_check_oracle) + '\n')
             if rep_check_oracle != True:
                 rep_check_mysql = mysql_rep_check(sbs_no, store_no, key)
-                print('rep_check_mysql = ' + str(rep_check_mysql))
-                file.write('rep_check_mysql = ' + str(rep_check_mysql) + '\n')
+                #print('rep_check_mysql = ' + str(rep_check_mysql))
+                #file.write('rep_check_mysql = ' + str(rep_check_mysql) + '\n')
                 if rep_check_mysql == 'Offline':
                     return 'Offline'
                 if rep_check_mysql == False and resend_data == True:
                     print('Resending data...')
                     file.write('Resending data...' + '\n')
+                    investigate.write('Item SID: ' + str(key) + ' quantity not equal. POA Qty: ' + str(oracle_invn_list[key]) + ' ' + store_hostname + ' Qty: ' + str(mysql_invn_list[key]) + '. Item is not waiting to be replicated.\n\n')
                     resend_item_v9(key, sbs_no, store_no)
 
     for key in mysql_invn_list:
@@ -362,9 +368,10 @@ with open('stores.txt') as f:
         if not os.path.exists('Qty_' + str(time_and_date)):
             os.makedirs('Qty_' + str(time_and_date))
 
-        summary = open('Qty_' + str(time_and_date) + '\\Qty_Summary_' + time_and_date + '.txt', 'a')
-        errors = open('Qty_' + str(time_and_date) + '\\Qty_Errors_' + time_and_date + '.txt', 'a')
-        file = open('Qty_' + str(time_and_date) + '\\Qty_' + store_hostname + '_' + time_and_date + '.txt', 'w')
+        summary = open('Qty_' + str(time_and_date) + '\\Summary_Qty_' + time_and_date + '.txt', 'a')
+        errors = open('Qty_' + str(time_and_date) + '\\Errors_Qty_' + time_and_date + '.txt', 'a')
+        file = open('Qty_' + str(time_and_date) + '\\' + store_hostname + '_Qty_' + time_and_date + '.txt', 'w')
+        investigate = open('Qty_' + str(time_and_date) + '\\Investigate_Qty_' + time_and_date + '.txt', 'a')
         
         print('Store Hostname: ' + store_hostname)
         file.write('Store Hostname: ' + store_hostname + '\n')
@@ -389,6 +396,8 @@ with open('stores.txt') as f:
         os.fsync(summary.fileno())
         errors.flush()
         os.fsync(errors.fileno())
+        investigate.flush()
+        os.fsync(investigate.fileno())
 
         host_check = check_host_is_correct(store_hostname)
 
@@ -400,23 +409,23 @@ with open('stores.txt') as f:
         if total_qty == 'Offline':
             continue
 
-        if total_qty == 'Not Equal':
-            oracle_invn_list = query_oracle_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-            oracle_invn_list = dict(oracle_invn_list)
-            oracle_invn_list = {key:int(value) for key, value in oracle_invn_list.items()}
+        #if total_qty == 'Not Equal':
+        oracle_invn_list = query_oracle_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        oracle_invn_list = dict(oracle_invn_list)
+        oracle_invn_list = {key:int(value) for key, value in oracle_invn_list.items()}
 
-            mysql_invn_list = query_mysql_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-            
-            if mysql_invn_list == 'Offline':
-                continue
+        mysql_invn_list = query_mysql_invn_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        
+        if mysql_invn_list == 'Offline':
+            continue
 
-            mysql_invn_list = dict(mysql_invn_list)
-            mysql_invn_list = {key:int(value) for key, value in mysql_invn_list.items()}
-            
-            compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_list, mysql_invn_list, resend_data)
+        mysql_invn_list = dict(mysql_invn_list)
+        mysql_invn_list = {key:int(value) for key, value in mysql_invn_list.items()}
+        
+        compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_invn_list, mysql_invn_list, resend_data)
 
-            if compare_lists == 'Offline':
-                continue
+        if compare_lists == 'Offline':
+            continue
 
         file.close()
         summary.close()

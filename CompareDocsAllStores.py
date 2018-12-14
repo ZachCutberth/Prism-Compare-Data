@@ -224,6 +224,7 @@ def compare_lists(store_hostname, sbs_no, store_no, oracle_doc_list, mysql_doc_l
             if resend_data == True:
                 print('Resending data...')
                 file.write('Resending data...' + '\n')
+                investigate.write('Item Doc: ' + str(store_record[0]) + ' from store ' + str(store_hostname) + ' not found at POA.\n\n')
                 resend_doc(str(store_record[0]), sbs_no, store_no)
 
     #for store_item in mysql_invn_dict:
@@ -432,9 +433,10 @@ with open('stores.txt') as f:
         if not os.path.exists('Doc_' + str(time_and_date)):
             os.makedirs('Doc_' + str(time_and_date))
 
-        summary = open('Doc_' + str(time_and_date) + '\\Doc_Summary_' + time_and_date + '.txt', 'a')
-        errors = open('Doc_' + str(time_and_date) + '\\Doc_Errors_' + time_and_date + '.txt', 'a')
-        file = open('Doc_' + str(time_and_date) + '\\Doc_' + store_hostname + '_' + time_and_date + '.txt', 'w')
+        summary = open('Doc_' + str(time_and_date) + '\\Summary_Doc_' + time_and_date + '.txt', 'a')
+        errors = open('Doc_' + str(time_and_date) + '\\Errors_Doc_' + time_and_date + '.txt', 'a')
+        file = open('Doc_' + str(time_and_date) + '\\' + store_hostname + '_Doc_' + time_and_date + '.txt', 'w')
+        investigate = open('Doc_' + str(time_and_date) + '\\Investigate_Doc_' + time_and_date + '.txt', 'a')
         
         print('Store Hostname: ' + store_hostname)
         file.write('Store Hostname: ' + store_hostname + '\n')
@@ -459,30 +461,33 @@ with open('stores.txt') as f:
         os.fsync(summary.fileno())
         errors.flush()
         os.fsync(errors.fileno())
+        investigate.flush()
+        os.fsync(investigate.fileno())
 
         host_check = check_host_is_correct(store_hostname)
 
         if host_check != True:
             continue
         
-        total_docs = compare_total_docs(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        #total_docs = compare_total_docs(store_hostname, store_info['sbs_no'], store_info['store_no'])
 
-        if total_docs == 'Offline':
+        #if total_docs == 'Offline':
+        #    continue
+
+        #if total_docs == 'Not Equal':
+        oracle_doc_list = query_oracle_doc_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+
+        mysql_doc_list = query_mysql_doc_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
+        
+        if mysql_doc_list == 'Offline':
             continue
+        
+        compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_doc_list, mysql_doc_list, resend_data)
 
-        if total_docs == 'Not Equal':
-            oracle_doc_list = query_oracle_doc_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-
-            mysql_doc_list = query_mysql_doc_list(store_hostname, store_info['sbs_no'], store_info['store_no'])
-            
-            if mysql_doc_list == 'Offline':
-                continue
-            
-            compare_lists(store_hostname, store_info['sbs_no'], store_info['store_no'], oracle_doc_list, mysql_doc_list, resend_data)
-
-            if compare_lists == 'Offline':
-                continue
+        if compare_lists == 'Offline':
+            continue
 
         file.close()
         summary.close()
         errors.close()
+        investigate.close()
